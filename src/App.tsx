@@ -8,7 +8,6 @@ import {
   Settings, 
   LogOut,
   ChevronRight,
-  Database,
   LayoutDashboard,
   Key,
   Cpu,
@@ -26,7 +25,6 @@ import { Segnalazione, FilterState, AppDatabase, User, ModusOperandiStore } from
 import Dashboard from './components/Dashboard';
 import Analysis from './components/Analysis';
 import AnalysisReport from './components/AnalysisReport';
-import RevisionView from './components/RevisionView';
 import ConfiguratorView from './components/ConfiguratorView';
 import SharedFilterBar from './components/SharedFilterBar';
 import CruscottoView from './components/CruscottoView';
@@ -41,7 +39,7 @@ const App: React.FC = () => {
   const [db, setDb] = useState<AppDatabase | null>(null);
   const [dbHandle, setDbHandle] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'cruscotto' | 'schedario' | 'analisi' | 'report' | 'revisioni' | 'gestione' | 'config' | 'utenti' | 'verifica'>('cruscotto');
+  const [activeTab, setActiveTab] = useState<'cruscotto' | 'schedario' | 'analisi' | 'report' | 'gestione' | 'config' | 'utenti' | 'verifica'>('cruscotto');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [searchingReportId, setSearchingReportId] = useState<string | null>(null);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
@@ -281,7 +279,6 @@ const App: React.FC = () => {
     { id: 'analisi', label: 'Analisi Fenomenologica', icon: BarChart2 },
     { id: 'report', label: 'Report Investigativo', icon: ClipboardCheck },
     { id: 'verifica', label: 'Verifica DB', icon: ShieldAlert },
-    { id: 'revisioni', label: 'Revisioni', icon: Database, badge: db.segnalazioni.filter(s => s.requiresRevision).length },
     { id: 'gestione', label: 'Gestione Segnalazioni', icon: Key },
     { id: 'config', label: 'Configuratore MO', icon: Settings },
     ...(currentUser.ruolo === 'admin' ? [{ id: 'utenti', label: 'Gestione Utenti', icon: Users }] : []),
@@ -506,14 +503,6 @@ const App: React.FC = () => {
             )}
             {activeTab === 'analisi' && <Analysis reports={filteredReports} apiKey={currentUser.apiKey} onViewDetails={setSelectedReport} />}
             {activeTab === 'report' && <AnalysisReport reports={filteredReports} apiKey={currentUser.apiKey} comandoName={db.comandoName} />}
-            {activeTab === 'revisioni' && (
-              <RevisionView 
-                reports={db.segnalazioni} 
-                db={db}
-                setDb={(newDb: any) => canEdit ? setDb(newDb) : alert("Permessi insufficienti.")} 
-                onUpdateTaxonomy={handleUpdateTaxonomy} 
-              />
-            )}
             {activeTab === 'gestione' && (
               <GestioneSegnalazioni 
                 reports={filteredReports} 

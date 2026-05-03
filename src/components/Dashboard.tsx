@@ -33,6 +33,48 @@ interface DashboardProps {
   onViewPersona: (persona: Persona) => void;
 }
 
+// Applies the same auto-fix logic as VerificaDB "Risolvi Tutte" on newly imported reports
+const autoFixReport = (r: Segnalazione): Segnalazione => {
+  const normalizeDateStr = (val?: string): string => {
+    if (!val) return '01/01/2000';
+    const clean = val.replace(/[.\-]/g, '/');
+    const parts = clean.split('/');
+    if (parts.length === 3) {
+      let d = parts[0], m = parts[1], y = parts[2];
+      if (d.length === 4) { const tmp = d; d = y; y = tmp; }
+      return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y.padStart(4, '0')}`;
+    }
+    return val;
+  };
+
+  let fixed = { ...r };
+
+  // Normalize dataOra → DD/MM/YYYY HH:MM
+  const timeParts = (fixed.dataOra || '').split(/[ T]/);
+  const fixedDate = normalizeDateStr(timeParts[0]);
+  let fixedTime = timeParts[1] || '00:00';
+  const hm = fixedTime.split(':');
+  if (hm.length >= 2) fixedTime = `${hm[0].padStart(2, '0')}:${hm[1].padStart(2, '0')}`;
+  fixed.dataOra = `${fixedDate} ${fixedTime}`;
+
+  // Normalize birth dates for all subjects
+  fixed.indagati = (fixed.indagati || []).map(p => ({
+    ...p,
+    dataNascita: p.dataNascita ? normalizeDateStr(p.dataNascita) : p.dataNascita
+  }));
+  fixed.vittime = (fixed.vittime || []).map(p => ({
+    ...p,
+    dataNascita: p.dataNascita ? normalizeDateStr(p.dataNascita) : p.dataNascita
+  }));
+
+  // Fill missing required fields with safe defaults
+  if (!fixed.comune || fixed.comune.trim() === '') fixed.comune = 'N/D';
+  if (!fixed.provincia || fixed.provincia.trim() === '') fixed.provincia = 'ND';
+  if (!fixed.oggetto || fixed.oggetto.trim() === '') fixed.oggetto = 'EVENTO DA DEFINIRE';
+
+  return fixed;
+};
+
 const Dashboard: React.FC<DashboardProps> = ({ 
   reports, 
   db, 
@@ -118,12 +160,42 @@ const Dashboard: React.FC<DashboardProps> = ({
           allExtracted = [...allExtracted, ...json.segnalazioni];
           setProgress(fileBaseProgress + (100 / totalFiles));
         } else {
-          setStatus(`Analisi AI ${file.name}...`);
-          setProgress(fileBaseProgress + (30 / totalFiles));
-          
-          const result = await analyzeJsonReports(text, db.configuratore, apiKey);
-          if (result && result.segnalazioni && Array.isArray(result.segnalazioni)) {
-            allExtracted = [...allExtracted, ...result.segnalazioni];
+          // Build a list of individual AI-ready payloads, one per report.
+          // Case 1: SDI/police export format { Documenti: { Segnalazioni: [...] } }
+          // Strip heavy RTF and Destinatari fields to keep input tokens minimal
+          // so the AI can process every single record reliably.
+          let itemsToProcess: string[] = [];
+
+          if (json && json.Documenti && Array.isArray(json.Documenti.Segnalazioni) && json.Documenti.Segnalazioni.length > 0) {
+            itemsToProcess = json.Documenti.Segnalazioni.map((item: any) => {
+              const { TestoRtf: _rtf, TestoArmaRtf: _artf, Destinatari: _dest, ...stripped } = item;
+              return JSON.stringify(stripped);
+            });
+          // Case 2: Top-level JSON array
+          } else if (json && Array.isArray(json) && json.length > 0) {
+            const BATCH_SIZE = 3;
+            for (let b = 0; b < json.length; b += BATCH_SIZE) {
+              itemsToProcess.push(JSON.stringify(json.slice(b, b + BATCH_SIZE)));
+            }
+          // Case 3: { segnalazioni: [...] } without idUnivoco
+          } else if (json && json.segnalazioni && Array.isArray(json.segnalazioni) && json.segnalazioni.length > 0) {
+            const BATCH_SIZE = 3;
+            for (let b = 0; b < json.segnalazioni.length; b += BATCH_SIZE) {
+              itemsToProcess.push(JSON.stringify(json.segnalazioni.slice(b, b + BATCH_SIZE)));
+            }
+          // Case 4: raw text or unrecognised structure
+          } else {
+            itemsToProcess = [text];
+          }
+
+          const numItems = itemsToProcess.length;
+          for (let ci = 0; ci < numItems; ci++) {
+            setStatus(`Analisi AI ${file.name}${numItems > 1 ? ` (${ci + 1}/${numItems})` : ''}...`);
+            setProgress(fileBaseProgress + (30 / totalFiles) + (ci / numItems) * (60 / totalFiles));
+            const result = await analyzeJsonReports(itemsToProcess[ci], db.configuratore, apiKey);
+            if (result && result.segnalazioni && Array.isArray(result.segnalazioni)) {
+              allExtracted = [...allExtracted, ...result.segnalazioni];
+            }
           }
           setProgress(fileBaseProgress + (100 / totalFiles));
         }
@@ -209,19 +281,19 @@ const Dashboard: React.FC<DashboardProps> = ({
         return;
       }
 
-      // 2. Prepare data with defaults
+      // 2. Prepare data with defaults and auto-fix integrity issues (same as VerificaDB "Risolvi Tutte")
       const preparedReports = uniqueNewReports.map(rev => {
         const cat = String(rev.categoria || '').toUpperCase().trim() || 'VARIE';
         const mo = String(rev.modus_operandi_dettaglio || '').toUpperCase().trim() || 'ALTRO';
         const tmo = String(rev.tipo_modus_operandi || '').toUpperCase().trim() || 'GENERALE';
         
-        return {
+        return autoFixReport({
           ...rev,
           categoria: cat,
           modus_operandi_dettaglio: mo,
           tipo_modus_operandi: tmo,
           requiresRevision: false
-        };
+        });
       });
 
       // 3. Consolidated functional update

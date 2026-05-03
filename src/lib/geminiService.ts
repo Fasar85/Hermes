@@ -92,6 +92,7 @@ export const analyzeJsonReports = async (jsonContent: string, configMO: ModusOpe
         model: GEMINI_MODEL,
         contents: jsonContent,
         config: {
+          maxOutputTokens: 65536,
           systemInstruction: `Sei un esperto di analisi criminale della Polizia.
 Leggi il contenuto fornito (può contenere una o più segnalazioni in formato testo o JSON grezzo).
 Il tuo compito è estrarre e strutturare i dati secondo lo schema richiesto.
